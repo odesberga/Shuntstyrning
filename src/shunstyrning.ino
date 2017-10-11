@@ -11,6 +11,9 @@
 #define D5_pin 5
 #define D6_pin 6
 #define D7_pin 7
+
+float val=0;
+float val2=0;
 int currview=0;
 LiquidCrystal_I2C lcd(I2C_ADDR,En_pin,Rw_pin,Rs_pin,D4_pin,D5_pin,D6_pin,D7_pin);
 float factor1=1.0;
@@ -34,19 +37,21 @@ lcd.print("hahne");
 
 void loop()
 {
-    showview(0);
-delay(1000);
+
+  val=analogRead(A3);
+  val2=analogRead(A4);
+setFactors();
     showview(1);
-    delay(1000);
+delay(1000);
 
 }
 
 void showview(int viewnr)
 {
     switch (viewnr) {
-        case 0: MainView(10,30);
+        case 0: MainView(10,factor1);
             break;
-        case 1: MainView(0,40);
+        case 1: TempView();
             break;
     }
 }
@@ -54,13 +59,27 @@ void showview(int viewnr)
 
 
 
-void MainView(int outtemp,int pipetemp)
+void MainView(int outtemp,float pipetemp)
 {
-    lcd.clear();
+//    lcd.clear();
     String outstr ="Ute temp:"+(String)outtemp+";C";
     Printstring(0,0,outstr);
      outstr ="Shunt temp:"+(String)pipetemp+";C";
     Printstring(1,0,outstr);
+
+}
+void TempView()
+{
+//    lcd.clear();
+    String outstr ="U/F 20/"+(String)(int)calcTemp(20)+" 10/"+(String)(int)calcTemp(10)+" 0/"+(String)(int)calcTemp(0);
+
+    Printstring(0,0,outstr);
+     outstr ="-10/"+(String)(int)calcTemp(-10)+" -20/"+(String)(int)calcTemp(-20)+" -30/"+(String)(int)calcTemp(-30);
+    Printstring(1,0,outstr);
+     outstr ="Factor1: "+(String)factor1;
+    Printstring(2,0,outstr);
+    outstr ="Factor2: "+(String)factor2;
+    Printstring(3,0,outstr);
 
 }
 void Printstring(int row,int index,String outstring)
@@ -77,17 +96,29 @@ void Printstring(int row,int index,String outstring)
         }
 
     }
+  }
 
 void setFactors()
 {
-    factor1=0.9;
-    factor2=1.0;
+    factor1=((val/1022)+0.8)*1.3;
+    factor2=(val2/1022)+1;
 }
 
-integer calcTemp(int outTemp)
+float calcTemp(int outTemp)
 {
-
+float c = 0;
+float v =0;
+for(int i=20;i > -31; i-- ){
+if(i==outTemp){
+  v=(i+(c*factor1))*factor2;
+  break;
+  }
+  c++;
 }
-
+if(v > 99){
+return 99;
+} else {
+return v;
+}
 
 }
