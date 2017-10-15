@@ -3,6 +3,9 @@
 #include "Wire.h"
 #include "LCD.h"
 #include "LiquidCrystal_I2C.h"
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
 
 #define I2C_ADDR 0x3f
 #define Rs_pin 0
@@ -13,23 +16,43 @@
 #define D5_pin 5
 #define D6_pin 6
 #define D7_pin 7
+#define ONE_WIRE_BUS1 A2
+#define CirkPumpBus 4
+#define ShuntDirBus 5
+#define ShuntBus 6
+#define ShuntrunSec 3
+#define ScreentimeOutSec 10
+#define ButtontimeOutSec 5
+
+
+OneWire oneWire1(ONE_WIRE_BUS1);
+DallasTemperature TempOutSide(&oneWire1);
+#define ONE_WIRE_BUS2 A3
+OneWire oneWire2(ONE_WIRE_BUS2);
+DallasTemperature TempPipe(&oneWire2);
+
 const int del=100;
-const int menuitemCount=4;
+const int menuitemCount=5;
 const int pc=3; //portcount
 unsigned long ScreentimeOut=0;
 unsigned long ShunttimeOut=0;
 unsigned long buttoninactive=0;
 unsigned long shuntdelay=0;
+unsigned long runshuntdelay=0;
 unsigned long btnDelay;
 unsigned long gendel;
 float val=0;
 float val2=0;
 int currview=0;
+int currOutSideTemp=0;
+int currPipeTemp=0;
+int secLeft=0;
+int secRight=0;
 LiquidCrystal_I2C lcd(I2C_ADDR,En_pin,Rw_pin,Rs_pin,D4_pin,D5_pin,D6_pin,D7_pin);
 float factor1=1.0;
 float factor2=1.0;
 float lastfactor=1;
-
+bool shuntlock=false;
 int ports[pc][4] = {
   {7, 0, 0, 0} ,
   {8, 0, 0, 0} ,
@@ -53,6 +76,7 @@ struct smenuitem {
     int value=0;
     bool useStringvalue=false;
     bool callFunc=false;
+    bool hasSubMenu=true;
     ssubmenuitem smenitem;
 };
 
@@ -71,6 +95,12 @@ int pdelay=200;
 void setup()
 {
 defMenu();
+pinMode(ShuntBus, OUTPUT);
+pinMode(ShuntDirBus, OUTPUT);
+pinMode(CirkPumpBus, OUTPUT);
+digitalWrite(ShuntBus, LOW);
+digitalWrite(ShuntDirBus, LOW);
+digitalWrite(CirkPumpBus, LOW);
 Serial.begin(9600);
 lcd.begin (20,4);
 lcd.setBacklightPin(BACKLIGHT_PIN,POSITIVE);
@@ -93,6 +123,7 @@ pinMode(ports[i][0], OUTPUT);
 digitalWrite(ports[i][0],HIGH);}
 buttoninactive=millis();
 gendel=millis();
+  //discoverOneWireDevices();
 }
 
 
@@ -105,9 +136,7 @@ if (millis()-gendel >= pdelay) {
   val2=analogRead(A1);
 setFactors();
 readButtons();
-
-
-if ( millis() - buttoninactive >= 5000 ){
+if ( millis() - buttoninactive >= ButtontimeOutSec*1000 ){
     if (!insubmenu){
         if (firstrun){
         lcd.clear();
@@ -118,13 +147,19 @@ if ( millis() - buttoninactive >= 5000 ){
     TempView();
     }
 }
-if ( millis() - ScreentimeOut >= 10000 ){
-    if (!insubmenu){
-    lcd.setBacklight(LOW);
-    }
-}
+  if ( millis() - ScreentimeOut >= ScreentimeOutSec * 1000 ){
+      if (!insubmenu){
+      lcd.setBacklight(LOW);
+      }
+  }
 
-}
+  }
+  if ( millis() - ShunttimeOut >= ShuntrunSec *1000){
+    runshunt(false,true);
+  }
+  if ( millis() - ShunttimeOut >= menuItems[2].value *1000){
+    calcTempAndRunShunt();
+  }
 
 }
 
@@ -194,31 +229,69 @@ void defMenu(){
     } else{
     menuItems[m].value= EEPROM.read(m);
     }
-
-}
-
-
-
-
-void showview(int viewnr)
-{
-    switch (viewnr) {
-        case 0: MainView(10,factor1);
-            break;
-        case 1: TempView();
-            break;
+    m =4;
+    menuItems[m].row1="MainView";
+    menuItems[m].row2="";
+    menuItems[m].row3="";
+    menuItems[m].useStringvalue=false;
+    menuItems[m].smenitem.maxvalue=0;
+    menuItems[m].smenitem.minvalue=0;
+    menuItems[m].callFunc=true;
+    menuItems[m].hasSubMenu=false;
+    menuItems[m].smenitem.row1="Ange Sek";
+    menuItems[m].smenitem.row2="@";
+    menuItems[m].smenitem.submenuStringvalues[0]="";
+    menuItems[m].smenitem.submenuStringvalues[1]="";
+    if( EEPROM.read(m) > menuItems[m].smenitem.maxvalue){
+    menuItems[m].value= menuItems[m].smenitem.minvalue;
+    } else{
+    menuItems[m].value= EEPROM.read(m);
     }
+
+}
+
+
+
+void runshunt(bool right,bool off){
+  if (off){
+    digitalWrite(ShuntDirBus, LOW);
+    digitalWrite(ShuntBus, LOW);
+  } else {
+    if (right){
+      if (secRight < menuItems[3].value+ShuntrunSec){
+
+    digitalWrite(ShuntDirBus, HIGH);
+    digitalWrite(ShuntBus, HIGH);
+    secRight=secRight+2;
+    }
+    secLeft=0;
+    } else {
+      if (secLeft < menuItems[3].value+ShuntrunSec){
+
+      digitalWrite(ShuntDirBus, LOW);
+      digitalWrite(ShuntBus, HIGH);
+      secLeft=secLeft+2;
+    }
+      secRight=0;
+
+    }
+
+
+  }
+
+
 }
 
 
 
 
-void MainView(int outtemp,float pipetemp)
+
+void MainView()
 {
     lcd.clear();
-    String outstr ="Ute temp:"+(String)outtemp+";C";
+    String outstr ="Ute temp:"+(String)currOutSideTemp+";C";
     Printstring(0,0,outstr);
-     outstr ="Shunt temp:"+(String)pipetemp+";C";
+     outstr ="Shunt temp:"+(String)currPipeTemp+";C";
     Printstring(1,0,outstr);
 
 }
@@ -429,14 +502,21 @@ if (!inMainView){
 void showmenuitem(int item){
 lcd.clear();
 inMainView=false;
+if (!menuItems[currentmenuitem].callFunc){
 Printstring(0, 0, menuItems[currentmenuitem].row1);
 Printstring(1, 0, menuItems[currentmenuitem].row2);
 Printstring(2, 0, menuItems[currentmenuitem].row3);
 Printstring(3, 0, menuItems[currentmenuitem].row4);
+} else{
+if (menuItems[currentmenuitem].row1== "MainView"){
+  MainView();
+}
 
+}
 }
 
 void showsubmenuitem(int menuitem,int submenuitem){
+if (menuItems[currentmenuitem].hasSubMenu){
     insubmenu=true;
     lcd.clear();
     menuItems[currentmenuitem].value=submenuitem;
@@ -445,6 +525,56 @@ void showsubmenuitem(int menuitem,int submenuitem){
     Printstring(1, 0, menuItems[currentmenuitem].smenitem.row2);
     Printstring(2, 0, menuItems[currentmenuitem].smenitem.row3);
     Printstring(3, 0, menuItems[currentmenuitem].smenitem.row4);
+}
 
+}
+/*
+void discoverOneWireDevices(void) {
+  byte i;
+  byte present = 0;
+  byte data[12];
+  byte addr[8];
+
+  Serial.print("Looking for 1-Wire devices...\n\r");
+  while(ds.search(addr)) {
+    Serial.print("\n\rFound \'1-Wire\' device with address:\n\r");
+    for( i = 0; i < 8; i++) {
+      Serial.print("0x");
+      if (addr[i] < 16) {
+        Serial.print('0');
+      }
+      Serial.print(addr[i], HEX);
+      if (i < 7) {
+        Serial.print(", ");
+      }
+    }
+    if ( OneWire::crc8( addr, 7) != addr[7]) {
+        Serial.print("CRC is not valid!\n");
+        return;
+    }
+  }
+  Serial.print("\n\r\n\rThat's it.\r\n");
+  ds.reset_search();
+  return;
+}
+*/
+void SetCurrTemp(){
+TempOutSide.requestTemperatures();
+currOutSideTemp=(int)TempOutSide.getTempCByIndex(0);
+TempPipe.requestTemperatures();
+currPipeTemp=(int)TempPipe.getTempCByIndex(0);
+
+}
+
+void calcTempAndRunShunt(){
+SetCurrTemp();
+int aTemp = (int)calcTemp(currOutSideTemp);
+ShunttimeOut=millis();
+if (currPipeTemp < aTemp){
+  runshunt(true,false);
+}
+if (currPipeTemp > aTemp){
+  runshunt(false,false);
+}
 
 }
