@@ -142,6 +142,7 @@ bool insubmenu=false;
 int currentmenuitem=0;
 int currentsubmenuitem=0;
 int submenuItemscount=0;
+int ERRORCOUNT=0;
 bool ERROR=false;
 bool firstrun=true;
 int pdelay=200;
@@ -423,9 +424,10 @@ void Printstring(int row,int index,String outstring)
 
 void setFactors()
 {
-    factor1=((val/1022)+1);
-    factor2=(val2/1022)+0.5+(val/1022);
+
     if(!(((int)(val+val2) > lastfactor-3) && ((int)(val+val2) < lastfactor+3)) ){
+        factor1=((val/1022)+1);
+        factor2=(val2/1022)+0.5+(val/1022);
         ScreentimeOut=millis();
         lcd.setBacklight(HIGH);
     }
@@ -616,9 +618,14 @@ TempPipe.requestTemperatures();
 currPipeTemp=(int)TempPipe.getTempCByIndex(0);
 
 if ((currOutSideTemp > -126 )&&(currPipeTemp > -126)){
+    ERRORCOUNT=0;
     ERROR=false;
 } else {
+    ERRORCOUNT++;
+    if(ERRORCOUNT>10){
     ERROR=true;
+    }
+
 
 }
 }
